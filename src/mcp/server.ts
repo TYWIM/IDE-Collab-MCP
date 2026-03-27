@@ -44,6 +44,19 @@ async function hubFetch<T = unknown>(
   }
 }
 
+function encodePath(filePath: string): string {
+  return filePath.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/');
+}
+
+function formatUptime(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) return `${h}小时${m}分${s}秒`;
+  if (m > 0) return `${m}分${s}秒`;
+  return `${s}秒`;
+}
+
 // 心跳定时器
 let heartbeatInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -489,7 +502,7 @@ server.tool(
       };
     }
 
-    const result = await hubFetch<FileLock>(`/api/locks/${file_path.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/')}`, {
+    const result = await hubFetch<FileLock>(`/api/locks/${encodePath(file_path)}`, {
       method: 'POST',
       body: JSON.stringify({ lockedBy: currentInstanceName, reason, ttl }),
     });
@@ -526,7 +539,7 @@ server.tool(
     file_path: z.string().describe('要解锁的文件路径'),
   },
   async ({ file_path }) => {
-    const result = await hubFetch(`/api/locks/${file_path.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/')}`, {
+    const result = await hubFetch(`/api/locks/${encodePath(file_path)}`, {
       method: 'DELETE',
     });
 
@@ -559,10 +572,10 @@ server.tool(
       }
 
       const list = result.data
-        .map(
-          (lock) =>
-            `🔒 **${lock.filePath}**\n   锁定者: ${lock.lockedBy}\n   原因: ${lock.reason}\n   锁定时间: ${lock.lockedAt}`
-        )
+        .map((lock) => {
+          const expiry = lock.expiresAt ? `\n   自动过期: ${lock.expiresAt}` : '';
+          return `🔒 **${lock.filePath}**\n   锁定者: ${lock.lockedBy}\n   原因: ${lock.reason}\n   锁定时间: ${lock.lockedAt}${expiry}`;
+        })
         .join('\n\n');
 
       return {
@@ -617,7 +630,7 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text: `📊 协作网络状态\n\n🟢 在线实例 (${d.instances.length}):\n${instanceList}\n\n📨 消息总数: ${d.messageCount}\n📝 共享笔记: ${d.noteCount}\n🔒 文件锁:\n${lockList}\n\n⏱️ Hub 运行时间: ${Math.round(d.uptime)}秒`,
+            text: `📊 协作网络状态\n\n🟢 在线实例 (${d.instances.length}):\n${instanceList}\n\n📨 消息总数: ${d.messageCount}\n📝 共享笔记: ${d.noteCount}\n🔒 文件锁:\n${lockList}\n\n⏱️ Hub 运行时间: ${formatUptime(d.uptime)}`,
           },
         ],
       };

@@ -55,13 +55,14 @@ function cleanupStaleInstances() {
       wsClients.get(id)?.close();
       wsClients.delete(id);
       // 释放该实例持有的所有文件锁
+      const staleTs = new Date().toISOString();
       for (const [path, lock] of fileLocks) {
         if (lock.lockedBy === id || lock.lockedBy === inst.name) {
           fileLocks.delete(path);
           broadcast({
             type: 'file_unlocked',
             data: { filePath: path },
-            timestamp: new Date().toISOString(),
+            timestamp: staleTs,
           });
         }
       }
@@ -122,6 +123,11 @@ app.post('/api/instances', (req, res) => {
   const body = req.body as RegisterRequest;
   if (!body.name || !body.workingOn) {
     res.json({ success: false, error: '缺少 name 或 workingOn' } satisfies ApiResponse);
+    return;
+  }
+  const nameTaken = Array.from(instances.values()).some(i => i.name === body.name);
+  if (nameTaken) {
+    res.json({ success: false, error: `名称 "${body.name}" 已被其他实例使用，请换一个名称` } satisfies ApiResponse);
     return;
   }
   const id = uuidv4();
