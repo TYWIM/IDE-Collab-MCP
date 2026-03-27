@@ -118,7 +118,7 @@ app.use((req, res, next) => {
     const inst = instances.get(instanceId);
     if (inst) {
       const unread = messages.filter(
-        m => (m.to === inst.name || m.to === instanceId || m.to === 'all') && !m.readBy.includes(inst.name)
+        m => (m.to === inst.name || m.to === instanceId || m.to === 'all') && !m.readBy.includes(inst.name) && m.from !== inst.name
       ).length;
       res.setHeader('X-Unread-Count', unread.toString());
     }
@@ -286,6 +286,7 @@ app.get('/api/messages', (req, res) => {
 
   let result = messages.filter(m => {
     if (toStr && !(m.to === toStr || m.to === 'all')) return false;
+    if (toStr && m.from === toStr && m.to === 'all') return false; // 不显示自己发的广播
     if (fromStr && m.from !== fromStr) return false;
     if (typeStr && m.type !== typeStr) return false;
     if (unread === 'true' && toStr && m.readBy.includes(toStr)) return false;
@@ -325,7 +326,7 @@ app.post('/api/messages/mark-read', (req, res) => {
   }
   let count = 0;
   for (const msg of messages) {
-    if ((msg.to === inst.name || msg.to === instanceId || msg.to === 'all') && !msg.readBy.includes(inst.name)) {
+    if ((msg.to === inst.name || msg.to === instanceId || msg.to === 'all') && !msg.readBy.includes(inst.name) && msg.from !== inst.name) {
       msg.readBy.push(inst.name);
       count++;
     }

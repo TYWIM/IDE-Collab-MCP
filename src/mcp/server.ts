@@ -134,7 +134,7 @@ server.tool(
     }
 
     return {
-      content: [{ type: 'text' as const, text: `❌ 注册失败: ${result.error}` }],
+      content: [{ type: 'text' as const, text: `❌ 注册失败: ${result.error}${unreadHint()}` }],
       isError: true,
     };
   }
@@ -158,7 +158,7 @@ server.tool(
       const list = result.data
         .map((inst) => {
           const isMe = inst.id === currentInstanceId ? ' 👈 (当前实例)' : '';
-          return `- **${inst.name}**${isMe}\n  状态: ${inst.status} | 工作内容: ${inst.workingOn}\n  ID: ${inst.id}`;
+          return `- **${inst.name}**${isMe}\n  状态: ${inst.status} | 工作内容: ${inst.workingOn}\n  ID: ${inst.id}\n  发消息: send_message(to=\"${inst.name}\", ...)`;
         })
         .join('\n\n');
 
