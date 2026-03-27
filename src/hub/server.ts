@@ -259,9 +259,10 @@ app.post('/api/messages', (req, res) => {
 
 // 获取消息（支持过滤）
 app.get('/api/messages', (req, res) => {
-  const { to, from, unread, limit } = req.query;
+  const { to, from, unread, limit, type } = req.query;
   const toStr = to as string | undefined;
   const fromStr = from as string | undefined;
+  const typeStr = type as string | undefined;
   const limitNum = limit ? parseInt(limit as string, 10) : undefined;
   if (limitNum !== undefined && isNaN(limitNum)) {
     res.status(400).json({ success: false, error: 'limit 必须是数字' } satisfies ApiResponse);
@@ -271,6 +272,7 @@ app.get('/api/messages', (req, res) => {
   let result = messages.filter(m => {
     if (toStr && !(m.to === toStr || m.to === 'all')) return false;
     if (fromStr && m.from !== fromStr) return false;
+    if (typeStr && m.type !== typeStr) return false;
     if (unread === 'true' && toStr && m.readBy.includes(toStr)) return false;
     return true;
   });
@@ -383,8 +385,8 @@ app.delete('/api/notes/:id', (req, res) => {
   }
   notes.delete(req.params.id);
   broadcast({
-    type: 'note_updated',
-    data: { id: req.params.id, deleted: true },
+    type: 'note_deleted',
+    data: { id: req.params.id },
     timestamp: new Date().toISOString(),
   });
   res.json({ success: true } satisfies ApiResponse);
@@ -397,7 +399,7 @@ app.post('/api/locks/:filePath(*)', (req, res) => {
   const filePath = req.params.filePath;
   const existing = fileLocks.get(filePath);
   if (existing) {
-    res.json({
+    res.status(409).json({
       success: false,
       error: `文件已被 ${existing.lockedBy} 锁定 (原因: ${existing.reason})`,
       data: existing,

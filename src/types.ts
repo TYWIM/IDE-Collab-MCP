@@ -56,6 +56,7 @@ export type WSEventType =
   | 'new_message'
   | 'note_added'
   | 'note_updated'
+  | 'note_deleted'
   | 'file_locked'
   | 'file_unlocked';
 

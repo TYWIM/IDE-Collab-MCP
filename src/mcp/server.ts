@@ -226,8 +226,9 @@ server.tool(
   {
     unread_only: z.boolean().default(true).describe('是否只获取未读消息'),
     limit: z.number().default(20).describe('最多返回多少条消息'),
+    type: z.enum(['info', 'question', 'warning', 'request', 'response']).optional().describe('按消息类型过滤（可选）'),
   },
-  async ({ unread_only, limit }) => {
+  async ({ unread_only, limit, type }) => {
     if (!currentInstanceName) {
       return {
         content: [{ type: 'text' as const, text: '❌ 请先使用 register 注册当前实例。' }],
@@ -240,6 +241,7 @@ server.tool(
       limit: limit.toString(),
     });
     if (unread_only) params.set('unread', 'true');
+    if (type) params.set('type', type);
 
     const result = await hubFetch<Message[]>(`/api/messages?${params}`);
 
@@ -490,6 +492,29 @@ server.tool(
   }
 );
 
+// ---------- Tool: delete_note (删除共享笔记) ----------
+server.tool(
+  'delete_note',
+  '删除一条共享笔记。需要提供笔记ID（可从 get_notes 获取）。',
+  {
+    note_id: z.string().describe('要删除的笔记ID'),
+  },
+  async ({ note_id }) => {
+    const result = await hubFetch(`/api/notes/${note_id}`, { method: 'DELETE' });
+
+    if (result.success) {
+      return {
+        content: [{ type: 'text' as const, text: `🗑️ 笔记 ${note_id} 已删除。` }],
+      };
+    }
+
+    return {
+      content: [{ type: 'text' as const, text: `❌ 删除失败: ${result.error}` }],
+      isError: true,
+    };
+  }
+);
+
 // ---------- Tool: lock_file (锁定文件) ----------
 server.tool(
   'lock_file',
@@ -557,6 +582,33 @@ server.tool(
 
     return {
       content: [{ type: 'text' as const, text: `❌ 解锁失败: ${result.error}` }],
+      isError: true,
+    };
+  }
+);
+
+// ---------- Tool: force_unlock_file (强制解锁文件) ----------
+server.tool(
+  'force_unlock_file',
+  '强制解锁任意文件（不检查锁持有者）。用于锁持有者已离线或异常时的紧急情况。',
+  {
+    file_path: z.string().describe('要强制解锁的文件路径'),
+  },
+  async ({ file_path }) => {
+    // 不传 unlockedBy，Hub 会跳过持有者校验
+    const result = await hubFetch(`/api/locks/${encodePath(file_path)}`, {
+      method: 'DELETE',
+      body: JSON.stringify({}),
+    });
+
+    if (result.success) {
+      return {
+        content: [{ type: 'text' as const, text: `🔓 文件已强制解锁: ${file_path}` }],
+      };
+    }
+
+    return {
+      content: [{ type: 'text' as const, text: `❌ 强制解锁失败: ${result.error}` }],
       isError: true,
     };
   }
