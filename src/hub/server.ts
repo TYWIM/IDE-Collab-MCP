@@ -111,6 +111,21 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
+// 为每个响应附带当前请求者的未读消息数
+app.use((req, res, next) => {
+  const instanceId = req.headers['x-instance-id'] as string | undefined;
+  if (instanceId) {
+    const inst = instances.get(instanceId);
+    if (inst) {
+      const unread = messages.filter(
+        m => (m.to === inst.name || m.to === instanceId || m.to === 'all') && !m.readBy.includes(inst.name)
+      ).length;
+      res.setHeader('X-Unread-Count', unread.toString());
+    }
+  }
+  next();
+});
+
 // ---------- 健康检查 ----------
 app.get('/health', (_req, res) => {
   res.json({ success: true, data: { status: 'ok', uptime: process.uptime() } });

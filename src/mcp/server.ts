@@ -22,22 +22,26 @@ const HUB_URL = process.env.HUB_URL || 'http://localhost:9800';
 
 let currentInstanceId: string | null = null;
 let currentInstanceName: string | null = null;
+let pendingUnreadCount: number = 0; // 最近一次响应中的未读消息数
 
 async function hubFetch<T = unknown>(
   path: string,
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 10_000); // 10秒超时
+  const timer = setTimeout(() => controller.abort(), 10_000);
   try {
     const res = await fetch(`${HUB_URL}${path}`, {
       ...options,
       signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
+        ...(currentInstanceId ? { 'X-Instance-Id': currentInstanceId } : {}),
         ...options.headers,
       },
     });
+    const unread = res.headers.get('X-Unread-Count');
+    if (unread !== null) pendingUnreadCount = parseInt(unread, 10);
     return (await res.json()) as ApiResponse<T>;
   } catch (err) {
     const msg = (err as Error).name === 'AbortError'
@@ -47,6 +51,13 @@ async function hubFetch<T = unknown>(
   } finally {
     clearTimeout(timer);
   }
+}
+
+// 若有未读消息，返回提醒文本（调用后重置计数）
+function unreadHint(): string {
+  const count = pendingUnreadCount;
+  pendingUnreadCount = 0;
+  return count > 0 ? `\n\n📬 提示：你有 ${count} 条未读消息，可用 get_messages 查看。` : '';
 }
 
 function encodePath(filePath: string): string {
@@ -116,7 +127,7 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text: `✅ 注册成功！\n\n实例ID: ${result.data.id}\n名称: ${result.data.name}\n工作内容: ${result.data.workingOn}\n\n你现在可以与其他AI实例协作了。使用 list_instances 查看在线的其他AI。`,
+            text: `✅ 注册成功！\n\n实例ID: ${result.data.id}\n名称: ${result.data.name}\n工作内容: ${result.data.workingOn}\n\n你现在可以与其他AI实例协作了。使用 list_instances 查看在线的其他AI。${unreadHint()}`,
           },
         ],
       };
@@ -206,7 +217,7 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text: `${typeEmoji[type]} 消息已发送！\n\n发送给: ${to}\n类型: ${type}\n消息ID: ${result.data.id}`,
+            text: `${typeEmoji[type]} 消息已发送！\n\n发送给: ${to}\n类型: ${type}\n消息ID: ${result.data.id}${unreadHint()}`,
           },
         ],
       };
@@ -353,7 +364,7 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text: `✅ 状态已更新！\n\n状态: ${result.data.status}\n工作内容: ${result.data.workingOn}`,
+            text: `✅ 状态已更新！\n\n状态: ${result.data.status}\n工作内容: ${result.data.workingOn}${unreadHint()}`,
           },
         ],
       };
@@ -401,7 +412,7 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text: `📝 笔记已添加！\n\n标题: ${result.data.title}\n标签: ${result.data.tags.join(', ') || '无'}\nID: ${result.data.id}`,
+            text: `📝 笔记已添加！\n\n标题: ${result.data.title}\n标签: ${result.data.tags.join(', ') || '无'}\nID: ${result.data.id}${unreadHint()}`,
           },
         ],
       };
@@ -543,7 +554,7 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text: `🔒 文件已锁定！\n\n文件: ${file_path}\n原因: ${reason}${expiryInfo}\n\n⚠️ 修改完成后请使用 unlock_file 解锁。`,
+            text: `🔒 文件已锁定！\n\n文件: ${file_path}\n原因: ${reason}${expiryInfo}\n\n⚠️ 修改完成后请使用 unlock_file 解锁。${unreadHint()}`,
           },
         ],
       };
@@ -576,7 +587,7 @@ server.tool(
 
     if (result.success) {
       return {
-        content: [{ type: 'text' as const, text: `🔓 文件已解锁: ${file_path}` }],
+        content: [{ type: 'text' as const, text: `🔓 文件已解锁: ${file_path}${unreadHint()}` }],
       };
     }
 
