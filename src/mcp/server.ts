@@ -27,9 +27,12 @@ async function hubFetch<T = unknown>(
   path: string,
   options: RequestInit = {}
 ): Promise<ApiResponse<T>> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10_000); // 10秒超时
   try {
     const res = await fetch(`${HUB_URL}${path}`, {
       ...options,
+      signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
         ...options.headers,
@@ -37,10 +40,12 @@ async function hubFetch<T = unknown>(
     });
     return (await res.json()) as ApiResponse<T>;
   } catch (err) {
-    return {
-      success: false,
-      error: `无法连接到 Hub Server (${HUB_URL}): ${(err as Error).message}。请确保 Hub Server 已启动。`,
-    };
+    const msg = (err as Error).name === 'AbortError'
+      ? `Hub Server 响应超时 (${HUB_URL})，请检查服务是否正常运行。`
+      : `无法连接到 Hub Server (${HUB_URL}): ${(err as Error).message}。请确保 Hub Server 已启动。`;
+    return { success: false, error: msg };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -541,6 +546,7 @@ server.tool(
   async ({ file_path }) => {
     const result = await hubFetch(`/api/locks/${encodePath(file_path)}`, {
       method: 'DELETE',
+      body: JSON.stringify({ unlockedBy: currentInstanceName }),
     });
 
     if (result.success) {

@@ -69,7 +69,7 @@ function cleanupStaleInstances() {
       broadcast({
         type: 'instance_removed',
         data: { id, name: inst.name },
-        timestamp: new Date().toISOString(),
+        timestamp: staleTs,
       });
     }
   }
@@ -99,7 +99,7 @@ setInterval(cleanupExpiredLocks, 30_000);
 // ============================================
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '64kb' }));
 
 // 限速：每IP每分钟最多120次请求
 const limiter = rateLimit({
@@ -122,12 +122,12 @@ app.get('/health', (_req, res) => {
 app.post('/api/instances', (req, res) => {
   const body = req.body as RegisterRequest;
   if (!body.name || !body.workingOn) {
-    res.json({ success: false, error: '缺少 name 或 workingOn' } satisfies ApiResponse);
+    res.status(400).json({ success: false, error: '缺少 name 或 workingOn' } satisfies ApiResponse);
     return;
   }
   const nameTaken = Array.from(instances.values()).some(i => i.name === body.name);
   if (nameTaken) {
-    res.json({ success: false, error: `名称 "${body.name}" 已被其他实例使用，请换一个名称` } satisfies ApiResponse);
+    res.status(409).json({ success: false, error: `名称 "${body.name}" 已被其他实例使用，请换一个名称` } satisfies ApiResponse);
     return;
   }
   const id = uuidv4();
@@ -160,7 +160,7 @@ app.get('/api/instances', (_req, res) => {
 app.patch('/api/instances/:id', (req, res) => {
   const inst = instances.get(req.params.id);
   if (!inst) {
-    res.json({ success: false, error: '实例不存在' } satisfies ApiResponse);
+    res.status(404).json({ success: false, error: '实例不存在' } satisfies ApiResponse);
     return;
   }
   const body = req.body as UpdateStatusRequest;
@@ -179,7 +179,7 @@ app.patch('/api/instances/:id', (req, res) => {
 app.post('/api/instances/:id/heartbeat', (req, res) => {
   const inst = instances.get(req.params.id);
   if (!inst) {
-    res.json({ success: false, error: '实例不存在' } satisfies ApiResponse);
+    res.status(404).json({ success: false, error: '实例不存在' } satisfies ApiResponse);
     return;
   }
   inst.lastHeartbeat = new Date().toISOString();
@@ -190,12 +190,17 @@ app.post('/api/instances/:id/heartbeat', (req, res) => {
 app.delete('/api/instances/:id', (req, res) => {
   const inst = instances.get(req.params.id);
   if (!inst) {
-    res.json({ success: false, error: '实例不存在' } satisfies ApiResponse);
+    res.status(404).json({ success: false, error: '实例不存在' } satisfies ApiResponse);
     return;
   }
   instances.delete(req.params.id);
   wsClients.get(req.params.id)?.close();
   wsClients.delete(req.params.id);
+  // 清理消息 readBy 中该实例的记录
+  for (const msg of messages) {
+    const idx = msg.readBy.indexOf(inst.name);
+    if (idx !== -1) msg.readBy.splice(idx, 1);
+  }
   // 释放文件锁并广播解锁事件
   const unlockTs = new Date().toISOString();
   for (const [path, lock] of fileLocks) {
@@ -223,7 +228,7 @@ app.delete('/api/instances/:id', (req, res) => {
 app.post('/api/messages', (req, res) => {
   const body = req.body as SendMessageRequest;
   if (!body.from || !body.to || !body.content) {
-    res.json({ success: false, error: '缺少 from, to 或 content' } satisfies ApiResponse);
+    res.status(400).json({ success: false, error: '缺少 from, to 或 content' } satisfies ApiResponse);
     return;
   }
   const msg: Message = {
@@ -281,12 +286,12 @@ app.get('/api/messages', (req, res) => {
 app.patch('/api/messages/:id/read', (req, res) => {
   const msg = messages.find(m => m.id === req.params.id);
   if (!msg) {
-    res.json({ success: false, error: '消息不存在' } satisfies ApiResponse);
+    res.status(404).json({ success: false, error: '消息不存在' } satisfies ApiResponse);
     return;
   }
   const { readerName } = req.body as { readerName?: string };
   if (!readerName) {
-    res.json({ success: false, error: '缺少 readerName' } satisfies ApiResponse);
+    res.status(400).json({ success: false, error: '缺少 readerName' } satisfies ApiResponse);
     return;
   }
   if (!msg.readBy.includes(readerName)) msg.readBy.push(readerName);
@@ -298,7 +303,7 @@ app.post('/api/messages/mark-read', (req, res) => {
   const { instanceId } = req.body as { instanceId: string };
   const inst = instances.get(instanceId);
   if (!inst) {
-    res.json({ success: false, error: '实例不存在' } satisfies ApiResponse);
+    res.status(404).json({ success: false, error: '实例不存在' } satisfies ApiResponse);
     return;
   }
   let count = 0;
@@ -317,7 +322,7 @@ app.post('/api/messages/mark-read', (req, res) => {
 app.post('/api/notes', (req, res) => {
   const body = req.body as AddNoteRequest;
   if (!body.title || !body.content) {
-    res.json({ success: false, error: '缺少 title 或 content' } satisfies ApiResponse);
+    res.status(400).json({ success: false, error: '缺少 title 或 content' } satisfies ApiResponse);
     return;
   }
   const now = new Date().toISOString();
@@ -354,7 +359,7 @@ app.get('/api/notes', (req, res) => {
 app.patch('/api/notes/:id', (req, res) => {
   const note = notes.get(req.params.id);
   if (!note) {
-    res.json({ success: false, error: '笔记不存在' } satisfies ApiResponse);
+    res.status(404).json({ success: false, error: '笔记不存在' } satisfies ApiResponse);
     return;
   }
   const body = req.body as UpdateNoteRequest;
@@ -371,11 +376,17 @@ app.patch('/api/notes/:id', (req, res) => {
 
 // 删除笔记
 app.delete('/api/notes/:id', (req, res) => {
-  if (!notes.has(req.params.id)) {
-    res.json({ success: false, error: '笔记不存在' } satisfies ApiResponse);
+  const note = notes.get(req.params.id);
+  if (!note) {
+    res.status(404).json({ success: false, error: '笔记不存在' } satisfies ApiResponse);
     return;
   }
   notes.delete(req.params.id);
+  broadcast({
+    type: 'note_updated',
+    data: { id: req.params.id, deleted: true },
+    timestamp: new Date().toISOString(),
+  });
   res.json({ success: true } satisfies ApiResponse);
 });
 
@@ -395,7 +406,7 @@ app.post('/api/locks/:filePath(*)', (req, res) => {
   }
   const body = req.body as LockFileRequest;
   if (!body.lockedBy) {
-    res.json({ success: false, error: '缺少 lockedBy' } satisfies ApiResponse);
+    res.status(400).json({ success: false, error: '缺少 lockedBy' } satisfies ApiResponse);
     return;
   }
   const now = new Date();
@@ -421,8 +432,14 @@ app.post('/api/locks/:filePath(*)', (req, res) => {
 // 解锁文件
 app.delete('/api/locks/:filePath(*)', (req, res) => {
   const filePath = req.params.filePath;
-  if (!fileLocks.has(filePath)) {
-    res.json({ success: false, error: '该文件未被锁定' } satisfies ApiResponse);
+  const lock = fileLocks.get(filePath);
+  if (!lock) {
+    res.status(404).json({ success: false, error: '该文件未被锁定' } satisfies ApiResponse);
+    return;
+  }
+  const { unlockedBy } = req.body as { unlockedBy?: string };
+  if (unlockedBy && lock.lockedBy !== unlockedBy) {
+    res.status(403).json({ success: false, error: `无权解锁：该文件由 ${lock.lockedBy} 锁定` } satisfies ApiResponse);
     return;
   }
   fileLocks.delete(filePath);
