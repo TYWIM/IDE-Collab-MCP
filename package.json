@@ -1,0 +1,28 @@
+{
+  "name": "ide-collab-mcp",
+  "version": "1.0.0",
+  "description": "MCP Server for multi-IDE AI collaboration - 让多个IDE窗口的AI助手实时协作",
+  "type": "module",
+  "scripts": {
+    "build": "node --max-old-space-size=4096 node_modules/typescript/bin/tsc",
+    "start:hub": "node dist/hub/server.js",
+    "start:mcp": "node dist/mcp/server.js",
+    "dev:hub": "tsx src/hub/server.ts",
+    "dev:mcp": "tsx src/mcp/server.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "express": "^4.21.0",
+    "ws": "^8.18.0",
+    "uuid": "^10.0.0",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/ws": "^8.5.12",
+    "@types/uuid": "^10.0.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "tsx": "^4.19.0"
+  }
+}
