@@ -216,7 +216,7 @@ app.delete('/api/instances/:id', (req, res) => {
   broadcast({
     type: 'instance_removed',
     data: { id: req.params.id, name: inst.name },
-    timestamp: new Date().toISOString(),
+    timestamp: unlockTs,
   });
   console.log(`[Hub] 实例注销: ${inst.name} (${req.params.id})`);
   res.json({ success: true } satisfies ApiResponse);
