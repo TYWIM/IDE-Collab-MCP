@@ -77,9 +77,12 @@ server.tool(
     workspace: z.string().optional().describe('当前工作区路径（可选）'),
   },
   async ({ name, working_on, workspace }) => {
-    // 如果已注册，先注销
+    // 如果已注册，先注销并清理本地状态
     if (currentInstanceId) {
       await hubFetch(`/api/instances/${currentInstanceId}`, { method: 'DELETE' });
+      if (heartbeatInterval) { clearInterval(heartbeatInterval); heartbeatInterval = null; }
+      currentInstanceId = null;
+      currentInstanceName = null;
     }
 
     const result = await hubFetch<Instance>('/api/instances', {
@@ -245,7 +248,7 @@ server.tool(
       const list = result.data
         .map((msg) => {
           const emoji = typeEmoji[msg.type] || '📩';
-          const readMark = msg.read ? '' : ' 🆕';
+          const readMark = msg.readBy.includes(currentInstanceName!) ? '' : ' 🆕';
           const replyInfo = msg.replyTo ? ` (回复消息 ${msg.replyTo.substring(0, 8)}...)` : '';
           return `${emoji}${readMark} [${msg.timestamp}] **${msg.from}** -> ${msg.to}${replyInfo}\n   ${msg.content}\n   消息ID: ${msg.id}`;
         })
@@ -446,7 +449,7 @@ server.tool(
     const body: Record<string, unknown> = { content };
     if (tags !== undefined) body.tags = tags;
 
-    const result = await hubFetch<import('../types.js').SharedNote>(`/api/notes/${note_id}`, {
+    const result = await hubFetch<SharedNote>(`/api/notes/${note_id}`, {
       method: 'PATCH',
       body: JSON.stringify(body),
     });
@@ -486,7 +489,7 @@ server.tool(
       };
     }
 
-    const result = await hubFetch<FileLock>(`/api/locks/${encodeURIComponent(file_path)}`, {
+    const result = await hubFetch<FileLock>(`/api/locks/${file_path.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/')}`, {
       method: 'POST',
       body: JSON.stringify({ lockedBy: currentInstanceName, reason, ttl }),
     });
@@ -523,7 +526,7 @@ server.tool(
     file_path: z.string().describe('要解锁的文件路径'),
   },
   async ({ file_path }) => {
-    const result = await hubFetch(`/api/locks/${encodeURIComponent(file_path)}`, {
+    const result = await hubFetch(`/api/locks/${file_path.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/')}`, {
       method: 'DELETE',
     });
 
@@ -644,7 +647,10 @@ server.tool(
     });
 
     if (result.success) {
-      if (heartbeatInterval) clearInterval(heartbeatInterval);
+      if (heartbeatInterval) {
+        clearInterval(heartbeatInterval);
+        heartbeatInterval = null;
+      }
       const name = currentInstanceName;
       currentInstanceId = null;
       currentInstanceName = null;

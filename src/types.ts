@@ -24,7 +24,7 @@ export interface Message {
   content: string;
   type: MessageType;
   timestamp: string;
-  read: boolean;
+  readBy: string[]; // 已读的实例名称列表
   replyTo?: string;
 }
 

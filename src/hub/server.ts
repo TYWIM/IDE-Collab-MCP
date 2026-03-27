@@ -190,10 +190,16 @@ app.delete('/api/instances/:id', (req, res) => {
   instances.delete(req.params.id);
   wsClients.get(req.params.id)?.close();
   wsClients.delete(req.params.id);
-  // 释放文件锁
+  // 释放文件锁并广播解锁事件
+  const unlockTs = new Date().toISOString();
   for (const [path, lock] of fileLocks) {
     if (lock.lockedBy === req.params.id || lock.lockedBy === inst.name) {
       fileLocks.delete(path);
+      broadcast({
+        type: 'file_unlocked',
+        data: { filePath: path },
+        timestamp: unlockTs,
+      });
     }
   }
   broadcast({
@@ -221,7 +227,7 @@ app.post('/api/messages', (req, res) => {
     content: body.content,
     type: body.type || 'info',
     timestamp: new Date().toISOString(),
-    read: false,
+    readBy: [],
     replyTo: body.replyTo,
   };
   messages.push(msg);
@@ -242,21 +248,24 @@ app.post('/api/messages', (req, res) => {
 
 // 获取消息（支持过滤）
 app.get('/api/messages', (req, res) => {
-  let result = [...messages];
   const { to, from, unread, limit } = req.query;
+  const toStr = to as string | undefined;
+  const fromStr = from as string | undefined;
+  const limitNum = limit ? parseInt(limit as string, 10) : undefined;
+  if (limitNum !== undefined && isNaN(limitNum)) {
+    res.status(400).json({ success: false, error: 'limit 必须是数字' } satisfies ApiResponse);
+    return;
+  }
 
-  if (to) {
-    const toStr = to as string;
-    result = result.filter(m => m.to === toStr || m.to === 'all');
-  }
-  if (from) {
-    result = result.filter(m => m.from === (from as string));
-  }
-  if (unread === 'true') {
-    result = result.filter(m => !m.read);
-  }
-  if (limit) {
-    result = result.slice(-parseInt(limit as string, 10));
+  let result = messages.filter(m => {
+    if (toStr && !(m.to === toStr || m.to === 'all')) return false;
+    if (fromStr && m.from !== fromStr) return false;
+    if (unread === 'true' && toStr && m.readBy.includes(toStr)) return false;
+    return true;
+  });
+
+  if (limitNum) {
+    result = result.slice(-limitNum);
   }
 
   res.json({ success: true, data: result } satisfies ApiResponse<Message[]>);
@@ -269,7 +278,12 @@ app.patch('/api/messages/:id/read', (req, res) => {
     res.json({ success: false, error: '消息不存在' } satisfies ApiResponse);
     return;
   }
-  msg.read = true;
+  const { readerName } = req.body as { readerName?: string };
+  if (!readerName) {
+    res.json({ success: false, error: '缺少 readerName' } satisfies ApiResponse);
+    return;
+  }
+  if (!msg.readBy.includes(readerName)) msg.readBy.push(readerName);
   res.json({ success: true, data: msg } satisfies ApiResponse<Message>);
 });
 
@@ -283,8 +297,8 @@ app.post('/api/messages/mark-read', (req, res) => {
   }
   let count = 0;
   for (const msg of messages) {
-    if ((msg.to === inst.name || msg.to === instanceId || msg.to === 'all') && !msg.read) {
-      msg.read = true;
+    if ((msg.to === inst.name || msg.to === instanceId || msg.to === 'all') && !msg.readBy.includes(inst.name)) {
+      msg.readBy.push(inst.name);
       count++;
     }
   }
@@ -451,15 +465,18 @@ wss.on('connection', (ws, req) => {
   const url = new URL(req.url || '', `http://localhost:${PORT}`);
   const instanceId = url.searchParams.get('instanceId');
 
-  if (instanceId) {
-    wsClients.set(instanceId, ws);
-    console.log(`[Hub] WebSocket 连接: ${instanceId}`);
-
-    ws.on('close', () => {
-      wsClients.delete(instanceId);
-      console.log(`[Hub] WebSocket 断开: ${instanceId}`);
-    });
+  if (!instanceId || !instances.has(instanceId)) {
+    ws.close(4001, '实例不存在或未注册');
+    return;
   }
+
+  wsClients.set(instanceId, ws);
+  console.log(`[Hub] WebSocket 连接: ${instanceId}`);
+
+  ws.on('close', () => {
+    wsClients.delete(instanceId);
+    console.log(`[Hub] WebSocket 断开: ${instanceId}`);
+  });
 
   ws.on('error', (err) => {
     console.error('[Hub] WebSocket 错误:', err.message);
